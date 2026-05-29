@@ -5,11 +5,6 @@ const BASE_URL = 'https://fightroom.fr';
 export const REGION_ID = 'reg_01KP9Z19XKXCGQC3HCH64EXA0R';
 export const PLAN_ID = '01KP9Z1QHM0XT54E0KNV536B18';
 
-export const ROOMS = [
-  { id: '01KP9Z1QT8DHH7D1NYG3MYH503', name: 'Ring', available: true },
-  { id: '01KP9Z1QVMDQ4CK3X2ZX8T1JVJ', name: 'Percussions', available: true },
-  { id: '01KP9Z1QTX2ZJ1P7H8HR1FSA5Q', name: 'Octogone', available: true },
-] as const;
 
 const DEVICE_ID_KEY = 'fightroom_device_id';
 export const JWT_KEY = 'fightroom_jwt';
@@ -32,8 +27,10 @@ async function getDeviceId(): Promise<string> {
   return id;
 }
 
-// Hash du Server Action Next.js — à mettre à jour si fightroom.fr est redéployé
+// Next.js Server Action hashes — update when fightroom.fr is redeployed
 const NEXT_ACTION_HASH = '40ee68e67804a83b0025abe8b4881a8f93af166636';
+const CANCELLATION_PREVIEW_HASH = '6042ed18fdda2a3d2c87d303c2b991c47fea0b826c';
+const CANCEL_BOOKING_HASH = '60fdc212bcfd18e730947d6528f508cbc70ca15cd8';
 
 export async function login(email: string, password: string): Promise<string> {
   const res = await fetch(`${BASE_URL}/sign-in`, {
@@ -81,22 +78,8 @@ export async function getSessionCookieString(): Promise<string> {
 }
 
 async function buildHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
-  const jwt = await SecureStore.getItemAsync(JWT_KEY);
-  const cartId = await SecureStore.getItemAsync(CART_KEY);
-  const deviceId = await getDeviceId();
-
-  const cookies = [
-    jwt ? `_medusa_jwt=${jwt}` : '',
-    `_medusa_region_id=${REGION_ID}`,
-    `_medusa_locale=fr-FR`,
-    `_booking_device_id=${deviceId}`,
-    cartId ? `_medusa_cart_id=${cartId}` : '',
-  ]
-    .filter(Boolean)
-    .join('; ');
-
   return {
-    Cookie: cookies,
+    Cookie: await getSessionCookieString(),
     'Content-Type': 'application/json',
     Referer: BASE_URL,
     Origin: BASE_URL,
@@ -322,7 +305,7 @@ export async function fetchCustomer(): Promise<{ customer: Customer }> {
   return res.json();
 }
 
-// Extraire la valeur JSON d'un champ dans le payload RSC texte
+// Extract a JSON field value from the RSC text payload
 function extractRscField(text: string, field: string): unknown {
   const marker = `"${field}":`;
   const idx = text.indexOf(marker);
@@ -339,6 +322,149 @@ function extractRscField(text: string, field: string): unknown {
     }
   }
   return null;
+}
+
+function extractRscChunk(text: string, id: string): unknown {
+  const re = new RegExp(`(?:^|\\n)${id}:([^\\n]+)`);
+  const m = text.match(re);
+  if (!m) return null;
+  try { return JSON.parse(m[1]); } catch { return null; }
+}
+
+export interface Room {
+  id: string;
+  name: string;
+  available: boolean;
+}
+
+export interface Venue {
+  slug: string;
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  rooms: Room[];
+}
+
+type VenueMeta = { slug: string; latitude: number | null; longitude: number | null };
+
+async function fetchVenueMeta(): Promise<VenueMeta[]> {
+  const headers = await buildHeaders({ RSC: '1', Accept: 'text/x-component' });
+  const res = await fetch(`${BASE_URL}/booking`, { headers });
+  if (!res.ok) throw new Error(`Erreur lieux: ${res.status}`);
+  const text = await res.text();
+
+  // Extract slugs from href="/booking/{slug}"
+  const slugMatches = [...text.matchAll(/"href":"\/booking\/([a-z0-9-]+)"/g)];
+  const slugs = [...new Set(slugMatches.map((m) => m[1]))].filter(
+    (s) => s !== 'index' && !s.includes('/')
+  );
+  if (slugs.length === 0) throw new Error('Aucun lieu trouvé');
+
+  // Extract coords: "aria-label":"Carte de NAME","data-latitude":"LAT","data-longitude":"LNG"
+  const coordMap: Record<string, { lat: number; lng: number }> = {};
+  const coordRe = /"aria-label":"Carte de ([^"]+)","data-latitude":"([^"]+)","data-longitude":"([^"]+)"/g;
+  for (const m of text.matchAll(coordRe)) {
+    coordMap[m[1]] = { lat: parseFloat(m[2]), lng: parseFloat(m[3]) };
+  }
+
+  return slugs.map((slug) => {
+    // Match slug to venue name: "lille-valenciennes" → "Lille Valenciennes"
+    const nameKey = slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const coords = coordMap[nameKey] ?? null;
+    return { slug, latitude: coords?.lat ?? null, longitude: coords?.lng ?? null };
+  });
+}
+
+async function fetchVenueData(meta: VenueMeta): Promise<Venue> {
+  const headers = await buildHeaders({ RSC: '1', Accept: 'text/x-component' });
+  const res = await fetch(`${BASE_URL}/booking/${meta.slug}`, { headers });
+  if (!res.ok) throw new Error(`Erreur lieu (${meta.slug}): ${res.status}`);
+  const text = await res.text();
+
+  const featured = extractRscField(text, 'featuredResource') as Record<string, unknown> | null;
+  const children = extractRscField(text, 'childResources') as Record<string, unknown>[] | null;
+
+  if (!featured || !children?.length) throw new Error(`Données introuvables pour ${meta.slug}`);
+
+  const addr = featured.effective_address as Record<string, unknown> | null;
+  const address = addr
+    ? [addr.address_1, addr.postal_code, addr.city].filter(Boolean).join(', ')
+    : '';
+
+  return {
+    slug: meta.slug,
+    name: String(featured.title ?? meta.slug),
+    address,
+    latitude: meta.latitude,
+    longitude: meta.longitude,
+    rooms: children
+      .filter((r) => r.is_bookable !== false)
+      .map((r) => ({
+        id: String(r.id),
+        name: String(r.short_name ?? r.title ?? ''),
+        available: true,
+      })),
+  };
+}
+
+export async function fetchVenues(): Promise<Venue[]> {
+  const metas = await fetchVenueMeta();
+  const results = await Promise.allSettled(metas.map(fetchVenueData));
+  return results
+    .filter((r): r is PromiseFulfilledResult<Venue> => r.status === 'fulfilled')
+    .map((r) => r.value);
+}
+
+export interface CancellationPreview {
+  can_cancel: boolean;
+  can_refund: boolean;
+  can_apply_contract_refund: boolean;
+  booking_amount: number;
+  contract_refund_amount: number;
+  currency_code: string;
+  cancellation_policy: {
+    refund_percent: number;
+    after_deadline: boolean;
+    cancellation_allowed: boolean;
+    block_reason: string | null;
+    base_refund: number;
+    stripe_fee: number;
+    compensation_total: number;
+    fees_total: number;
+    refund_final: number;
+    minutes_until_start: number;
+  };
+}
+
+export async function fetchCancellationPreview(bookingId: string): Promise<CancellationPreview> {
+  const headers = await buildHeaders({
+    'Content-Type': 'text/plain;charset=UTF-8',
+    'next-action': CANCELLATION_PREVIEW_HASH,
+  });
+  const res = await fetch(`${BASE_URL}/account/bookings/${bookingId}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify([bookingId]),
+  });
+  if (!res.ok) throw new Error(`Erreur politique annulation: ${res.status}`);
+  const text = await res.text();
+  const preview = (extractRscField(text, 'preview') ?? extractRscChunk(text, '1')) as CancellationPreview | null;
+  if (!preview) throw new Error('Données annulation introuvables');
+  return preview;
+}
+
+export async function cancelBooking(bookingId: string, refundBooking: boolean): Promise<void> {
+  const headers = await buildHeaders({
+    'Content-Type': 'text/plain;charset=UTF-8',
+    'next-action': CANCEL_BOOKING_HASH,
+  });
+  const res = await fetch(`${BASE_URL}/account/bookings/${bookingId}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify([bookingId, { refund_booking: refundBooking }]),
+  });
+  if (!res.ok) throw new Error(`Erreur annulation: ${res.status}`);
 }
 
 export async function fetchBookingDetail(bookingId: string): Promise<BookingDetailData> {
