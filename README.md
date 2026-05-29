@@ -2,7 +2,9 @@
 
 Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). Permet de consulter les lieux, réserver une salle de combat et gérer ses réservations depuis son téléphone.
 
-> **Build de test (Android) :** [Télécharger sur Expo](https://expo.dev/accounts/gradleless/projects/fightroom/builds/c88f6597-2a0b-4ff7-9e03-d5a89c3e86e2)
+> **Build Android :** [Télécharger sur Expo](https://expo.dev/artifacts/eas/qLqU1p6AFtQZp5maqAMrKY.apk)
+>
+> <img src="pictures/qr_code_build.png" width="160"/>
 
 ---
 
@@ -47,5 +49,5 @@ Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). 
 
 ```bash
 bun install
-bun start
+bun run dev
 ```
