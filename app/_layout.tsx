@@ -40,6 +40,16 @@ export default function RootLayout() {
             options={{ title: 'Réservation', headerBackTitle: 'Retour' }}
           />
           <Stack.Screen
+            name="venue/[slug]"
+            options={({ route }) => ({
+              title: (route.params as { slug?: string })?.slug
+                ?.split('-')
+                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ') ?? 'Salles',
+              headerBackTitle: 'Retour',
+            })}
+          />
+          <Stack.Screen
             name="webview"
             options={({ route }) => ({
               title: (route.params as { title?: string })?.title ?? '',
