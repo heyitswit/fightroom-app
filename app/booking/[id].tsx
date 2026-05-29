@@ -1,16 +1,42 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { OpenMapsButton } from '@/components/OpenMapsButton';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { useBookingDetail } from '@/hooks/useBookingDetail';
-import type { Booking, Netcode } from '@/lib/api';
-import * as Clipboard from 'expo-clipboard';
+import { useVenues } from '@/hooks/useRooms';
+import { cancelBooking, fetchCancellationPreview } from '@/lib/api';
+import type { Booking, CancellationPreview, Netcode } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { useLocalSearchParams } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
+import { router, useLocalSearchParams } from 'expo-router';
 import { LockIcon } from 'lucide-react-native';
 import * as React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
+
+const fmtEur = (n: number) => n.toFixed(2).replace('.', ',');
+
+function fmtDuration(minutes: number): string {
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}j`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0 || parts.length === 0) parts.push(`${mins}min`);
+  return parts.join(' ');
+}
 
 export default function BookingDetailScreen() {
   const { id, bookingJson } = useLocalSearchParams<{ id: string; bookingJson: string }>();
@@ -19,6 +45,12 @@ export default function BookingDetailScreen() {
   }, [bookingJson]);
 
   const { data, isLoading, error } = useBookingDetail(id);
+  const { data: venues } = useVenues();
+  const queryClient = useQueryClient();
+
+  const [cancelling, setCancelling] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [preview, setPreview] = React.useState<CancellationPreview | null>(null);
 
   const item = booking?.booking_line_items[0];
   const deposit = booking?.deposit_summary;
@@ -28,61 +60,198 @@ export default function BookingDetailScreen() {
   const start = booking?.local_start_time.slice(0, 5).replace(':', 'h') ?? '';
   const end = booking?.local_end_time.slice(0, 5).replace(':', 'h') ?? '';
 
+  const venue = venues?.find((v) => v.rooms.some((r) => r.id === item?.resource_id));
+
+  async function handleCancel() {
+    if (!booking) return;
+    setCancelling(true);
+    try {
+      const p = await fetchCancellationPreview(booking.id);
+      if (!p.can_cancel) {
+        Alert.alert('Annulation impossible', p.cancellation_policy.block_reason ?? 'Cette réservation ne peut pas être annulée.');
+        return;
+      }
+      setPreview(p);
+      setDialogOpen(true);
+    } catch (e: unknown) {
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Impossible de charger les conditions d\'annulation');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function doCancel(withRefund: boolean) {
+    if (!booking) return;
+    setCancelling(true);
+    try {
+      await cancelBooking(booking.id, withRefund);
+      queryClient.invalidateQueries({ queryKey: ['customer-bookings'] });
+      router.back();
+    } catch (e: unknown) {
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Annulation échouée');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerClassName="px-4 pt-4 pb-10 gap-4">
-      {/* Résumé */}
-      {booking && (
-        <Card className="gap-0 py-0">
-          <CardHeader className="py-4">
-            <CardTitle>{item?.resource_title}</CardTitle>
-          </CardHeader>
-          <Separator />
-          <CardContent className="py-4 gap-1.5">
-            <Text className="capitalize text-foreground">{dateLabel}</Text>
-            <Text className="text-muted-foreground">{start} → {end}</Text>
-            {deposit?.has_deposit && (
-              <Text className="text-sm text-muted-foreground mt-1">
-                Acompte {deposit.total_amount} €
-                {deposit.overall_status === 'scheduled' && deposit.next_due_at
-                  ? ` · échéance ${format(parseISO(deposit.next_due_at), 'd MMM', { locale: fr })}`
-                  : ` · ${deposit.overall_status}`}
+    <>
+      <ScrollView className="flex-1 bg-background" contentContainerClassName="px-4 pt-4 pb-10 gap-4">
+        {/* Summary */}
+        {booking && (
+          <Card className="gap-0 py-0">
+            <CardHeader className="py-4">
+              <CardTitle>{item?.resource_title}</CardTitle>
+            </CardHeader>
+            <Separator />
+            <CardContent className="gap-1.5 py-4">
+              <Text className="capitalize text-foreground">{dateLabel}</Text>
+              <Text className="text-muted-foreground">
+                {start} → {end}
               </Text>
-            )}
-          </CardContent>
-        </Card>
+              {deposit?.has_deposit && (
+                <Text className="mt-1 text-sm text-muted-foreground">
+                  Acompte {deposit.total_amount} €
+                  {deposit.overall_status === 'scheduled' && deposit.next_due_at
+                    ? ` · échéance ${format(parseISO(deposit.next_due_at), 'd MMM', { locale: fr })}`
+                    : ` · ${deposit.overall_status}`}
+                </Text>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {venue && <OpenMapsButton venue={venue} />}
+
+        {/* Access codes */}
+        <View className="gap-3">
+          <Text variant="h3" className="text-foreground">
+            Codes d'accès
+          </Text>
+
+          {isLoading && (
+            <View className="items-center py-8">
+              <ActivityIndicator />
+            </View>
+          )}
+
+          {error && (
+            <Card className="border-destructive/30 bg-destructive/10 py-4">
+              <CardContent>
+                <Text className="text-sm text-destructive">{error.message}</Text>
+              </CardContent>
+            </Card>
+          )}
+
+          {data?.netcodes.map((netcode) => (
+            <NetcodeCard key={netcode.id} netcode={netcode} />
+          ))}
+
+          {data?.netcodes.length === 0 && (
+            <Card className="py-4">
+              <CardContent>
+                <Text className="text-center text-muted-foreground">Codes disponibles le jour J</Text>
+              </CardContent>
+            </Card>
+          )}
+        </View>
+
+        {booking?.status === 'confirmed' && (
+          <Pressable onPress={handleCancel} disabled={cancelling} className="active:opacity-70">
+            <View className="items-center rounded-lg border border-destructive/40 px-4 py-3">
+              {cancelling ? (
+                <ActivityIndicator size="small" />
+              ) : (
+                <Text className="text-sm font-medium text-destructive">Annuler la réservation</Text>
+              )}
+            </View>
+          </Pressable>
+        )}
+      </ScrollView>
+
+      {preview && (
+        <AlertDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Annuler la réservation ?</AlertDialogTitle>
+            </AlertDialogHeader>
+
+            <View className="gap-3">
+              <Text className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                Détail du remboursement
+              </Text>
+
+              <View className="overflow-hidden rounded-lg border border-border">
+                <RefundRow
+                  label1="Montant de la réservation"
+                  value1={`${fmtEur(preview.booking_amount)} €`}
+                  label2="Remboursement de base"
+                  value2={`${fmtEur(preview.cancellation_policy.base_refund)} €`}
+                />
+                <View className="border-t border-border">
+                  <RefundRow
+                    label1="Frais"
+                    value1={`${fmtEur(preview.cancellation_policy.fees_total)} €`}
+                    label2="Remboursement contractuel"
+                    value2={`${fmtEur(preview.contract_refund_amount)} €`}
+                  />
+                </View>
+                <View className="border-t border-border">
+                  <RefundRow
+                    label1="Pourcentage remboursé"
+                    value1={`${preview.cancellation_policy.refund_percent}%`}
+                    label2="Avant le début"
+                    value2={fmtDuration(preview.cancellation_policy.minutes_until_start)}
+                  />
+                </View>
+              </View>
+
+              <AlertDialogDescription>
+                Vous êtes à {fmtDuration(preview.cancellation_policy.minutes_until_start)} du début.
+                Remboursement de base de {fmtEur(preview.cancellation_policy.base_refund)} €, moins{' '}
+                {fmtEur(preview.cancellation_policy.fees_total)} € de frais, pour un remboursement
+                final de {fmtEur(preview.cancellation_policy.refund_final)} €.
+              </AlertDialogDescription>
+            </View>
+
+            <View className="gap-2 pt-1">
+              {preview.can_apply_contract_refund && (
+                <AlertDialogAction onPress={() => doCancel(true)}>
+                  <Text>Annuler et rembourser {fmtEur(preview.cancellation_policy.refund_final)} €</Text>
+                </AlertDialogAction>
+              )}
+              <AlertDialogAction
+                className="bg-destructive border-destructive"
+                onPress={() => doCancel(false)}>
+                <Text>Annuler sans remboursement</Text>
+              </AlertDialogAction>
+              <AlertDialogCancel>
+                <Text>Garder la réservation</Text>
+              </AlertDialogCancel>
+            </View>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
+    </>
+  );
+}
 
-      {/* Codes d'accès */}
-      <View className="gap-3">
-        <Text variant="h3" className="text-foreground">Codes d'accès</Text>
-
-        {isLoading && (
-          <View className="items-center py-8">
-            <ActivityIndicator />
-          </View>
-        )}
-
-        {error && (
-          <Card className="border-destructive/30 bg-destructive/10 py-4">
-            <CardContent>
-              <Text className="text-sm text-destructive">{error.message}</Text>
-            </CardContent>
-          </Card>
-        )}
-
-        {data?.netcodes.map((netcode) => (
-          <NetcodeCard key={netcode.id} netcode={netcode} />
-        ))}
-
-        {data?.netcodes.length === 0 && (
-          <Card className="py-4">
-            <CardContent>
-              <Text className="text-center text-muted-foreground">Codes disponibles le jour J</Text>
-            </CardContent>
-          </Card>
-        )}
+function RefundRow({
+  label1, value1, label2, value2,
+}: {
+  label1: string; value1: string; label2: string; value2: string;
+}) {
+  return (
+    <View className="flex-row">
+      <View className="flex-1 gap-1 border-r border-border p-3">
+        <Text className="text-xs uppercase tracking-wide text-muted-foreground">{label1}</Text>
+        <Text className="text-base font-semibold text-foreground">{value1}</Text>
       </View>
-    </ScrollView>
+      <View className="flex-1 gap-1 p-3">
+        <Text className="text-xs uppercase tracking-wide text-muted-foreground">{label2}</Text>
+        <Text className="text-base font-semibold text-foreground">{value2}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -103,16 +272,17 @@ function NetcodeCard({ netcode }: { netcode: Netcode }) {
   return (
     <Card className="gap-0 py-0">
       <CardHeader className="flex-row items-center justify-between py-3">
-        <View className="flex-row items-center gap-2 flex-1">
+        <View className="flex-1 flex-row items-center gap-2">
           <LockIcon size={15} color="#6b7280" />
-          <Text className="text-sm font-medium text-foreground flex-1" numberOfLines={1}>
+          <Text className="flex-1 text-sm font-medium text-foreground" numberOfLines={1}>
             {netcode.device_name}
           </Text>
         </View>
         <Badge
           variant="outline"
           className={isActive ? 'border-green-500 bg-green-100 dark:bg-green-900/30' : ''}>
-          <Text className={`text-xs font-medium ${isActive ? 'text-green-700 dark:text-green-300' : 'text-muted-foreground'}`}>
+          <Text
+            className={`text-xs font-medium ${isActive ? 'text-green-700 dark:text-green-300' : 'text-muted-foreground'}`}>
             {isActive ? 'Actif' : netcode.status}
           </Text>
         </Badge>
@@ -120,21 +290,19 @@ function NetcodeCard({ netcode }: { netcode: Netcode }) {
 
       <Separator />
 
-      <CardContent className="py-4 gap-3">
+      <CardContent className="gap-3 py-4">
         <Pressable onPress={handleCopy} className="active:opacity-70">
-          <View className="rounded-lg bg-muted px-4 py-5 items-center gap-1">
+          <View className="items-center gap-1 rounded-lg bg-muted px-4 py-5">
             <Text className="text-4xl font-bold tracking-widest text-foreground">
               {numericCode}
             </Text>
-            {suffix && (
-              <Text className="text-sm text-muted-foreground">puis {suffix}</Text>
-            )}
-            <Text className="text-xs text-muted-foreground mt-1">
+            {suffix && <Text className="text-sm text-muted-foreground">puis {suffix}</Text>}
+            <Text className="mt-1 text-xs text-muted-foreground">
               {copied ? '✓ Copié !' : 'Appuyer pour copier'}
             </Text>
           </View>
         </Pressable>
-        <Text className="text-xs text-center text-muted-foreground">
+        <Text className="text-center text-xs text-muted-foreground">
           Valide {from} → {until}
         </Text>
       </CardContent>
