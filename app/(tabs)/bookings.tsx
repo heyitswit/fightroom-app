@@ -36,6 +36,7 @@ const STATUS_TEXT_CLASS: Record<string, string> = {
 
 const DEPOSIT_STATUS: Record<string, string> = {
   scheduled: 'Acompte à venir',
+  authorized: 'Autorisé',
   paid: 'Payé',
   captured: 'Payé',
   failed: 'Échec paiement',

@@ -319,11 +319,26 @@ export async function confirmSelection(
   return data;
 }
 
-export async function fetchCustomerBookings(): Promise<CustomerBookingsResponse> {
-  const headers = await buildHeaders();
-  const res = await fetch(`${BASE_URL}/api/booking/customer-bookings`, { headers });
+async function fetchBookingsForTab(tab: string): Promise<Booking[]> {
+  const headers = await buildHeaders({ RSC: '1', Accept: 'text/x-component' });
+  const res = await fetch(
+    `${BASE_URL}/account/bookings?tab=${tab}&sort=-start_time`,
+    { headers }
+  );
   assertOk(res, 'Erreur réservations');
-  return res.json();
+  const text = await res.text();
+  return (extractRscField(text, 'bookings') as Booking[] | null) ?? [];
+}
+
+export async function fetchCustomerBookings(): Promise<CustomerBookingsResponse> {
+  const [active, past, cancelled] = await Promise.all([
+    fetchBookingsForTab('active'),
+    fetchBookingsForTab('past'),
+    fetchBookingsForTab('cancelled'),
+  ]);
+  const bookings = [...active, ...past, ...cancelled]
+    .sort((a, b) => b.local_date.localeCompare(a.local_date));
+  return { bookings, count: bookings.length, offset: 0, limit: bookings.length };
 }
 
 export async function fetchCustomer(): Promise<{ customer: Customer }> {
