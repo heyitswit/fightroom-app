@@ -5,7 +5,7 @@ import { Text } from '@/components/ui/text';
 import { useCustomerBookings } from '@/hooks/useCustomerBookings';
 import type { Booking } from '@/lib/api';
 import { THEME } from '@/lib/theme';
-import { format, parseISO, startOfDay } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { router } from 'expo-router';
 import { CalendarIcon } from 'lucide-react-native';
@@ -45,7 +45,7 @@ const DEPOSIT_STATUS: Record<string, string> = {
 
 function isArchivedBooking(booking: Booking): boolean {
   if (booking.status === 'cancelled' || booking.status === 'completed') return true;
-  return parseISO(booking.local_date) < startOfDay(new Date());
+  return booking.local_date < format(new Date(), 'yyyy-MM-dd');
 }
 
 export default function BookingsScreen() {
@@ -73,7 +73,7 @@ export default function BookingsScreen() {
   const bookings = data?.bookings ?? [];
   const activeBookings = bookings.filter((b) => !isArchivedBooking(b));
   const archivedBookings = bookings.filter(isArchivedBooking);
-  const displayed = showArchived ? bookings : activeBookings;
+  const displayed = showArchived ? archivedBookings : activeBookings;
 
   return (
     <ScrollView
