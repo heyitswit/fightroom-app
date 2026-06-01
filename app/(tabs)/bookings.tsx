@@ -4,9 +4,12 @@ import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { useCustomerBookings } from '@/hooks/useCustomerBookings';
 import type { Booking } from '@/lib/api';
-import { format, parseISO } from 'date-fns';
+import { THEME } from '@/lib/theme';
+import { format, parseISO, startOfDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { router } from 'expo-router';
+import { CalendarIcon } from 'lucide-react-native';
+import { useColorScheme } from 'nativewind';
 import * as React from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
@@ -39,8 +42,16 @@ const DEPOSIT_STATUS: Record<string, string> = {
   cancelled: 'Annulé',
 };
 
+function isArchivedBooking(booking: Booking): boolean {
+  if (booking.status === 'cancelled' || booking.status === 'completed') return true;
+  return parseISO(booking.local_date) < startOfDay(new Date());
+}
+
 export default function BookingsScreen() {
   const { data, isLoading, error, refetch, isRefetching } = useCustomerBookings();
+  const [showArchived, setShowArchived] = React.useState(false);
+  const { colorScheme } = useColorScheme();
+  const colors = THEME[colorScheme ?? 'light'];
 
   if (isLoading) {
     return (
@@ -59,24 +70,38 @@ export default function BookingsScreen() {
   }
 
   const bookings = data?.bookings ?? [];
+  const activeBookings = bookings.filter((b) => !isArchivedBooking(b));
+  const archivedBookings = bookings.filter(isArchivedBooking);
+  const displayed = showArchived ? bookings : activeBookings;
 
   return (
     <ScrollView
       className="flex-1 bg-background"
       contentContainerClassName="px-4 pt-4 pb-8 gap-3"
       refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}>
-      <Text variant="h3" className="py-2 text-foreground">
-        Mes réservations
-      </Text>
+      <View className="flex-row items-center justify-between py-2">
+        <Text variant="h3" className="text-foreground">
+          Mes réservations
+        </Text>
+        {archivedBookings.length > 0 && (
+          <Pressable onPress={() => setShowArchived((v) => !v)} className="active:opacity-60 py-1 pl-3">
+            <Text className="text-sm text-muted-foreground">
+              {showArchived ? 'Actives seulement' : `Historique (${archivedBookings.length})`}
+            </Text>
+          </Pressable>
+        )}
+      </View>
 
-      {bookings.length === 0 && (
+      {displayed.length === 0 && (
         <View className="mt-16 items-center gap-3">
-          <Text className="text-4xl">📅</Text>
-          <Text className="text-muted-foreground">Aucune réservation pour le moment</Text>
+          <CalendarIcon size={40} color={colors.mutedForeground} />
+          <Text className="text-muted-foreground">
+            {bookings.length === 0 ? 'Aucune réservation pour le moment' : 'Aucune réservation à venir'}
+          </Text>
         </View>
       )}
 
-      {bookings.map((booking) => (
+      {displayed.map((booking) => (
         <BookingCard key={booking.id} booking={booking} />
       ))}
     </ScrollView>

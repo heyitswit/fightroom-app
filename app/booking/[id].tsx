@@ -255,19 +255,46 @@ function RefundRow({
   );
 }
 
+const NETCODE_STATUS_LABEL: Record<string, string> = {
+  active: 'Actif',
+  authorized: 'Autorisé',
+  scheduled: 'Programmé',
+  pending: 'En attente',
+  expired: 'Expiré',
+  used: 'Utilisé',
+  cancelled: 'Annulé',
+};
+
+const NETCODE_BADGE_CLASS: Record<string, string> = {
+  active: 'border-green-500 bg-green-100 dark:bg-green-900/30',
+  authorized: 'border-green-500 bg-green-100 dark:bg-green-900/30',
+  scheduled: 'border-yellow-500 bg-yellow-100 dark:bg-yellow-900/30',
+  pending: 'border-yellow-500 bg-yellow-100 dark:bg-yellow-900/30',
+};
+
+const NETCODE_TEXT_CLASS: Record<string, string> = {
+  active: 'text-green-700 dark:text-green-300',
+  authorized: 'text-green-700 dark:text-green-300',
+  scheduled: 'text-yellow-700 dark:text-yellow-300',
+  pending: 'text-yellow-700 dark:text-yellow-300',
+};
+
 function NetcodeCard({ netcode }: { netcode: Netcode }) {
   const [copied, setCopied] = React.useState(false);
   const numericCode = netcode.code.split(' + ')[0];
   const suffix = netcode.code.split(' + ')[1];
   const from = format(parseISO(netcode.effective_from), "HH'h'mm");
   const until = format(parseISO(netcode.effective_until), "HH'h'mm");
-  const isActive = netcode.status === 'active';
 
   async function handleCopy() {
     await Clipboard.setStringAsync(numericCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
+
+  const statusLabel = NETCODE_STATUS_LABEL[netcode.status] ?? netcode.status;
+  const badgeClass = NETCODE_BADGE_CLASS[netcode.status] ?? '';
+  const textClass = NETCODE_TEXT_CLASS[netcode.status] ?? 'text-muted-foreground';
 
   return (
     <Card className="gap-0 py-0">
@@ -278,12 +305,9 @@ function NetcodeCard({ netcode }: { netcode: Netcode }) {
             {netcode.device_name}
           </Text>
         </View>
-        <Badge
-          variant="outline"
-          className={isActive ? 'border-green-500 bg-green-100 dark:bg-green-900/30' : ''}>
-          <Text
-            className={`text-xs font-medium ${isActive ? 'text-green-700 dark:text-green-300' : 'text-muted-foreground'}`}>
-            {isActive ? 'Actif' : netcode.status}
+        <Badge variant="outline" className={badgeClass}>
+          <Text className={`text-xs font-medium ${textClass}`}>
+            {statusLabel}
           </Text>
         </Badge>
       </CardHeader>

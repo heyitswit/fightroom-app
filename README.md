@@ -33,10 +33,11 @@ Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). 
 
 - **Liste des lieux** — carte OSM intégrée par lieu, adresse, nombre de salles
 - **Réservation** — calendrier, choix de durée et créneau, ajout au panier fightroom.fr
-- **Réservations** — suivi en temps réel avec statut et acompte
-- **Codes d'accès** — netcodes actifs affichés et copiables depuis la réservation
+- **Réservations** — suivi des réservations à venir ; historique (terminées/annulées) accessible via toggle
+- **Codes d'accès** — netcodes affichés et copiables depuis la réservation, avec statut traduit (Actif, Autorisé, Programmé…)
 - **Ouvrir sur Maps** — lien direct vers l'adresse dans l'app Maps native
 - **Annulation** — prévisualisation du remboursement avant confirmation
+- **Session persistante** — reconnexion automatique silencieuse à l'expiration du JWT
 
 ## Stack
 

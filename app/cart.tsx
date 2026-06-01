@@ -14,7 +14,10 @@ export default function CartScreen() {
   }, []);
 
   function handleNavigationChange(navState: WebViewNavigation) {
-    if (navState.url.includes('fightroom.fr/account/bookings')) {
+    if (
+      navState.url.includes('fightroom.fr/account/bookings') ||
+      navState.url.includes('fightroom.fr/account/orders')
+    ) {
       queryClient.invalidateQueries({ queryKey: ['customer-bookings'] });
       router.replace('/(tabs)/bookings');
     }

@@ -2,6 +2,20 @@ import * as SecureStore from 'expo-secure-store';
 
 const BASE_URL = 'https://fightroom.fr';
 
+let _onUnauthorized: (() => void | Promise<void>) | null = null;
+
+export function registerUnauthorizedHandler(handler: () => void | Promise<void>): void {
+  _onUnauthorized = handler;
+}
+
+function assertOk(res: Response, errMsg: string): void {
+  if (res.status === 401) {
+    _onUnauthorized?.();
+    throw new Error('Session expirée, veuillez vous reconnecter');
+  }
+  if (!res.ok) throw new Error(`${errMsg}: ${res.status}`);
+}
+
 export const REGION_ID = 'reg_01KP9Z19XKXCGQC3HCH64EXA0R';
 export const PLAN_ID = '01KP9Z1QHM0XT54E0KNV536B18';
 
@@ -9,6 +23,7 @@ export const PLAN_ID = '01KP9Z1QHM0XT54E0KNV536B18';
 const DEVICE_ID_KEY = 'fightroom_device_id';
 export const JWT_KEY = 'fightroom_jwt';
 const CART_KEY = 'fightroom_cart_id';
+const CREDENTIALS_KEY = 'fightroom_credentials';
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -50,12 +65,25 @@ export async function login(email: string, password: string): Promise<string> {
 
   const jwt = match[1];
   await SecureStore.setItemAsync(JWT_KEY, jwt);
+  await SecureStore.setItemAsync(CREDENTIALS_KEY, JSON.stringify({ email, password }));
   return jwt;
 }
 
 export async function logout(): Promise<void> {
   await SecureStore.deleteItemAsync(JWT_KEY);
   await SecureStore.deleteItemAsync(CART_KEY);
+  await SecureStore.deleteItemAsync(CREDENTIALS_KEY);
+}
+
+export async function reauthenticate(): Promise<string | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(CREDENTIALS_KEY);
+    if (!raw) return null;
+    const { email, password } = JSON.parse(raw) as { email: string; password: string };
+    return await login(email, password);
+  } catch {
+    return null;
+  }
 }
 
 export async function getStoredJwt(): Promise<string | null> {
@@ -248,7 +276,7 @@ export async function fetchMonthAvailability(
     `${BASE_URL}/api/booking/availability?resource_id=${resourceId}&plan_id=${PLAN_ID}&view=month&anchor_date=${anchor}`,
     { headers }
   );
-  if (!res.ok) throw new Error(`Erreur disponibilité: ${res.status}`);
+  assertOk(res, 'Erreur disponibilité');
   return res.json();
 }
 
@@ -261,7 +289,7 @@ export async function fetchDayAvailability(
     `${BASE_URL}/api/booking/availability?resource_id=${resourceId}&plan_id=${PLAN_ID}&view=day&anchor_date=${date}`,
     { headers }
   );
-  if (!res.ok) throw new Error(`Erreur créneaux: ${res.status}`);
+  assertOk(res, 'Erreur créneaux');
   return res.json();
 }
 
@@ -283,7 +311,7 @@ export async function confirmSelection(
       devCreateStaleBookingCartLine: false,
     }),
   });
-  if (!res.ok) throw new Error(`Erreur réservation: ${res.status}`);
+  assertOk(res, 'Erreur réservation');
   const data: SelectionResponse = await res.json();
   if (data.cart_id) {
     await SecureStore.setItemAsync(CART_KEY, data.cart_id);
@@ -294,14 +322,14 @@ export async function confirmSelection(
 export async function fetchCustomerBookings(): Promise<CustomerBookingsResponse> {
   const headers = await buildHeaders();
   const res = await fetch(`${BASE_URL}/api/booking/customer-bookings`, { headers });
-  if (!res.ok) throw new Error(`Erreur réservations: ${res.status}`);
+  assertOk(res, 'Erreur réservations');
   return res.json();
 }
 
 export async function fetchCustomer(): Promise<{ customer: Customer }> {
   const headers = await buildHeaders();
   const res = await fetch(`${BASE_URL}/api/storefront/customer`, { headers });
-  if (!res.ok) throw new Error(`Erreur client: ${res.status}`);
+  assertOk(res, 'Erreur client');
   return res.json();
 }
 
@@ -351,7 +379,7 @@ type VenueMeta = { slug: string; latitude: number | null; longitude: number | nu
 async function fetchVenueMeta(): Promise<VenueMeta[]> {
   const headers = await buildHeaders({ RSC: '1', Accept: 'text/x-component' });
   const res = await fetch(`${BASE_URL}/booking`, { headers });
-  if (!res.ok) throw new Error(`Erreur lieux: ${res.status}`);
+  assertOk(res, 'Erreur lieux');
   const text = await res.text();
 
   // Extract slugs from href="/booking/{slug}"
@@ -379,7 +407,7 @@ async function fetchVenueMeta(): Promise<VenueMeta[]> {
 async function fetchVenueData(meta: VenueMeta): Promise<Venue> {
   const headers = await buildHeaders({ RSC: '1', Accept: 'text/x-component' });
   const res = await fetch(`${BASE_URL}/booking/${meta.slug}`, { headers });
-  if (!res.ok) throw new Error(`Erreur lieu (${meta.slug}): ${res.status}`);
+  assertOk(res, `Erreur lieu (${meta.slug})`);
   const text = await res.text();
 
   const featured = extractRscField(text, 'featuredResource') as Record<string, unknown> | null;
@@ -447,7 +475,7 @@ export async function fetchCancellationPreview(bookingId: string): Promise<Cance
     headers,
     body: JSON.stringify([bookingId]),
   });
-  if (!res.ok) throw new Error(`Erreur politique annulation: ${res.status}`);
+  assertOk(res, 'Erreur politique annulation');
   const text = await res.text();
   const preview = (extractRscField(text, 'preview') ?? extractRscChunk(text, '1')) as CancellationPreview | null;
   if (!preview) throw new Error('Données annulation introuvables');
@@ -464,7 +492,7 @@ export async function cancelBooking(bookingId: string, refundBooking: boolean): 
     headers,
     body: JSON.stringify([bookingId, { refund_booking: refundBooking }]),
   });
-  if (!res.ok) throw new Error(`Erreur annulation: ${res.status}`);
+  assertOk(res, 'Erreur annulation');
 }
 
 export async function fetchBookingDetail(bookingId: string): Promise<BookingDetailData> {
@@ -473,7 +501,7 @@ export async function fetchBookingDetail(bookingId: string): Promise<BookingDeta
     Accept: 'text/x-component',
   });
   const res = await fetch(`${BASE_URL}/account/bookings/${bookingId}`, { headers });
-  if (!res.ok) throw new Error(`Erreur: ${res.status}`);
+  assertOk(res, 'Erreur');
   const text = await res.text();
   const data = extractRscField(text, 'netcodesData') as BookingDetailData | null;
   if (!data) throw new Error('Codes d\'accès introuvables dans la réponse');
