@@ -2,6 +2,8 @@ import * as SecureStore from 'expo-secure-store';
 
 const BASE_URL = 'https://fightroom.fr';
 
+export const SESSION_EXPIRED_ERROR = 'Session expirée, veuillez vous reconnecter';
+
 let _onUnauthorized: (() => void | Promise<void>) | null = null;
 
 export function registerUnauthorizedHandler(handler: () => void | Promise<void>): void {
@@ -11,7 +13,7 @@ export function registerUnauthorizedHandler(handler: () => void | Promise<void>)
 function assertOk(res: Response, errMsg: string): void {
   if (res.status === 401) {
     _onUnauthorized?.();
-    throw new Error('Session expirée, veuillez vous reconnecter');
+    throw new Error(SESSION_EXPIRED_ERROR);
   }
   if (!res.ok) throw new Error(`${errMsg}: ${res.status}`);
 }

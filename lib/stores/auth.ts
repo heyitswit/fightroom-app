@@ -6,6 +6,7 @@ import {
   logout as apiLogout,
   reauthenticate,
   registerUnauthorizedHandler,
+  SESSION_EXPIRED_ERROR,
   type Customer,
 } from '@/lib/api';
 
@@ -23,12 +24,19 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => {
   let reauthInProgress = false;
   registerUnauthorizedHandler(async () => {
-    if (reauthInProgress) return;
+    // Don't fire during initialization — initialize() handles startup 401 itself
+    if (reauthInProgress || !get().initialized) return;
     reauthInProgress = true;
     try {
       const newJwt = await reauthenticate();
       if (newJwt) {
         set({ jwt: newJwt });
+        try {
+          const { customer } = await fetchCustomer();
+          set({ customer });
+        } catch {
+          // customer stays as-is, session is valid
+        }
       } else {
         await apiLogout();
         set({ jwt: null, customer: null });
@@ -53,9 +61,27 @@ export const useAuthStore = create<AuthState>((set, get) => {
           try {
             const { customer } = await fetchCustomer();
             set({ customer });
-          } catch {
-            await apiLogout();
-            set({ jwt: null, customer: null });
+          } catch (e) {
+            if (e instanceof Error && e.message === SESSION_EXPIRED_ERROR) {
+              // JWT expired on startup: try silent reauth before giving up
+              const newJwt = await reauthenticate();
+              if (newJwt) {
+                set({ jwt: newJwt });
+                try {
+                  const { customer } = await fetchCustomer();
+                  set({ customer });
+                } catch {
+                  await apiLogout();
+                  set({ jwt: null, customer: null });
+                }
+              } else {
+                await apiLogout();
+                set({ jwt: null, customer: null });
+              }
+            } else {
+              await apiLogout();
+              set({ jwt: null, customer: null });
+            }
           }
         }
       } finally {
