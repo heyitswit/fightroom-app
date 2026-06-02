@@ -199,7 +199,7 @@ export interface BookingLineItem {
 
 export interface Netcode {
   id: string;
-  code: string;
+  code: string | null;
   status: string;
   effective_from: string;
   effective_until: string;
@@ -350,21 +350,28 @@ export async function fetchCustomer(): Promise<{ customer: Customer }> {
   return res.json();
 }
 
-// Extract a JSON field value from the RSC text payload
+// Extract a JSON field value from the RSC text payload.
+// Scans all occurrences of the field key to handle RSC responses where the
+// field appears multiple times (e.g. first as a count/null, later as the array).
 function extractRscField(text: string, field: string): unknown {
   const marker = `"${field}":`;
-  const idx = text.indexOf(marker);
-  if (idx === -1) return null;
-  const start = idx + marker.length;
-  const opener = text[start];
-  if (opener !== '{' && opener !== '[') return null;
-  const closer = opener === '{' ? '}' : ']';
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === opener) depth++;
-    else if (text[i] === closer && --depth === 0) {
-      try { return JSON.parse(text.slice(start, i + 1)); } catch { return null; }
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const idx = text.indexOf(marker, searchFrom);
+    if (idx === -1) return null;
+    const start = idx + marker.length;
+    const opener = text[start];
+    if (opener === '{' || opener === '[') {
+      const closer = opener === '{' ? '}' : ']';
+      let depth = 0;
+      for (let i = start; i < text.length; i++) {
+        if (text[i] === opener) depth++;
+        else if (text[i] === closer && --depth === 0) {
+          try { return JSON.parse(text.slice(start, i + 1)); } catch { break; }
+        }
+      }
     }
+    searchFrom = idx + marker.length;
   }
   return null;
 }

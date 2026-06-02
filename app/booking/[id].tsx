@@ -281,12 +281,14 @@ const NETCODE_TEXT_CLASS: Record<string, string> = {
 
 function NetcodeCard({ netcode }: { netcode: Netcode }) {
   const [copied, setCopied] = React.useState(false);
-  const numericCode = netcode.code.split(' + ')[0];
-  const suffix = netcode.code.split(' + ')[1];
+  const parts = netcode.code?.split(' + ') ?? [];
+  const numericCode = parts[0] ?? null;
+  const suffix = parts[1] ?? null;
   const from = format(parseISO(netcode.effective_from), "HH'h'mm");
   const until = format(parseISO(netcode.effective_until), "HH'h'mm");
 
   async function handleCopy() {
+    if (!numericCode) return;
     await Clipboard.setStringAsync(numericCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -315,17 +317,23 @@ function NetcodeCard({ netcode }: { netcode: Netcode }) {
       <Separator />
 
       <CardContent className="gap-3 py-4">
-        <Pressable onPress={handleCopy} className="active:opacity-70">
-          <View className="items-center gap-1 rounded-lg bg-muted px-4 py-5">
-            <Text className="text-4xl font-bold tracking-widest text-foreground">
-              {numericCode}
-            </Text>
-            {suffix && <Text className="text-sm text-muted-foreground">puis {suffix}</Text>}
-            <Text className="mt-1 text-xs text-muted-foreground">
-              {copied ? '✓ Copié !' : 'Appuyer pour copier'}
-            </Text>
+        {numericCode ? (
+          <Pressable onPress={handleCopy} className="active:opacity-70">
+            <View className="items-center gap-1 rounded-lg bg-muted px-4 py-5">
+              <Text className="text-4xl font-bold tracking-widest text-foreground">
+                {numericCode}
+              </Text>
+              {suffix && <Text className="text-sm text-muted-foreground">puis {suffix}</Text>}
+              <Text className="mt-1 text-xs text-muted-foreground">
+                {copied ? '✓ Copié !' : 'Appuyer pour copier'}
+              </Text>
+            </View>
+          </Pressable>
+        ) : (
+          <View className="items-center rounded-lg bg-muted px-4 py-5">
+            <Text className="text-sm text-muted-foreground">Code non disponible</Text>
           </View>
-        </Pressable>
+        )}
         <Text className="text-center text-xs text-muted-foreground">
           Valide {from} → {until}
         </Text>
