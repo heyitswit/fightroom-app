@@ -258,16 +258,19 @@ function RefundRow({
 const NETCODE_STATUS_LABEL: Record<string, string> = {
   active: 'Actif',
   authorized: 'Autorisé',
+  released: 'Actif',
   scheduled: 'Programmé',
   pending: 'En attente',
   expired: 'Expiré',
   used: 'Utilisé',
   cancelled: 'Annulé',
+  revoked: 'Révoqué',
 };
 
 const NETCODE_BADGE_CLASS: Record<string, string> = {
   active: 'border-green-500 bg-green-100 dark:bg-green-900/30',
   authorized: 'border-green-500 bg-green-100 dark:bg-green-900/30',
+  released: 'border-green-500 bg-green-100 dark:bg-green-900/30',
   scheduled: 'border-yellow-500 bg-yellow-100 dark:bg-yellow-900/30',
   pending: 'border-yellow-500 bg-yellow-100 dark:bg-yellow-900/30',
 };
@@ -275,6 +278,7 @@ const NETCODE_BADGE_CLASS: Record<string, string> = {
 const NETCODE_TEXT_CLASS: Record<string, string> = {
   active: 'text-green-700 dark:text-green-300',
   authorized: 'text-green-700 dark:text-green-300',
+  released: 'text-green-700 dark:text-green-300',
   scheduled: 'text-yellow-700 dark:text-yellow-300',
   pending: 'text-yellow-700 dark:text-yellow-300',
 };
