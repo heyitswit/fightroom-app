@@ -32,12 +32,14 @@ export default function SignInScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       className="flex-1 bg-background">
-      <View className="flex-1 justify-center px-8 gap-6">
+      <View className="flex-1 justify-center gap-6 px-8">
         <View className="gap-1">
           <Text variant="h2" className="text-foreground">
             Fight Room
           </Text>
-          <Text className="text-muted-foreground">Lille · Valenciennes</Text>
+          <Text className="text-muted-foreground">
+            Boxe, lutte, MMA, Art martiaux: Vos studios privés dédiés aux sports de combat.
+          </Text>
         </View>
 
         <View className="gap-3">
