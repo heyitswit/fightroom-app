@@ -4,6 +4,7 @@ import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { useCustomerBookings } from '@/hooks/useCustomerBookings';
 import type { Booking } from '@/lib/api';
+import { DEPOSIT_STATUS } from '@/lib/labels';
 import { THEME } from '@/lib/theme';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -34,17 +35,6 @@ const STATUS_TEXT_CLASS: Record<string, string> = {
   completed: 'text-muted-foreground',
 };
 
-const DEPOSIT_STATUS: Record<string, string> = {
-  scheduled: 'Acompte à venir',
-  authorized: 'Autorisé',
-  released: 'Libéré',
-  paid: 'Payé',
-  captured: 'Payé',
-  refunded: 'Remboursé',
-  failed: 'Échec paiement',
-  cancelled: 'Annulé',
-  revoked: 'Révoqué',
-};
 
 function isArchivedBooking(booking: Booking): boolean {
   if (booking.status === 'cancelled' || booking.status === 'completed') return true;

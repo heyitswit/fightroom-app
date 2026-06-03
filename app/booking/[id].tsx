@@ -16,6 +16,7 @@ import { useBookingDetail } from '@/hooks/useBookingDetail';
 import { useVenues } from '@/hooks/useRooms';
 import { cancelBooking, fetchCancellationPreview } from '@/lib/api';
 import type { Booking, CancellationPreview, Netcode } from '@/lib/api';
+import { DEPOSIT_STATUS } from '@/lib/labels';
 import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -26,18 +27,6 @@ import * as React from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
 
 const fmtEur = (n: number) => n.toFixed(2).replace('.', ',');
-
-const DEPOSIT_STATUS: Record<string, string> = {
-  scheduled: 'Acompte à venir',
-  authorized: 'Autorisé',
-  released: 'Libéré',
-  paid: 'Payé',
-  captured: 'Payé',
-  refunded: 'Remboursé',
-  failed: 'Échec paiement',
-  cancelled: 'Annulé',
-  revoked: 'Révoqué',
-};
 
 function fmtDuration(minutes: number): string {
   const days = Math.floor(minutes / 1440);
