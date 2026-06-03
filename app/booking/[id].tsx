@@ -27,6 +27,18 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-nat
 
 const fmtEur = (n: number) => n.toFixed(2).replace('.', ',');
 
+const DEPOSIT_STATUS: Record<string, string> = {
+  scheduled: 'Acompte à venir',
+  authorized: 'Autorisé',
+  released: 'Libéré',
+  paid: 'Payé',
+  captured: 'Payé',
+  refunded: 'Remboursé',
+  failed: 'Échec paiement',
+  cancelled: 'Annulé',
+  revoked: 'Révoqué',
+};
+
 function fmtDuration(minutes: number): string {
   const days = Math.floor(minutes / 1440);
   const hours = Math.floor((minutes % 1440) / 60);
@@ -114,7 +126,7 @@ export default function BookingDetailScreen() {
                   Acompte {deposit.total_amount} €
                   {deposit.overall_status === 'scheduled' && deposit.next_due_at
                     ? ` · échéance ${format(parseISO(deposit.next_due_at), 'd MMM', { locale: fr })}`
-                    : ` · ${deposit.overall_status}`}
+                    : ` · ${DEPOSIT_STATUS[deposit.overall_status] ?? deposit.overall_status}`}
                 </Text>
               )}
             </CardContent>
