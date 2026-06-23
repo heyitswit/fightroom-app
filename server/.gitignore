@@ -1,0 +1,7 @@
+node_modules/
+data/
+.lacis/
+routes/_manifest.ts
+routes/_manifest.js
+dist/
+.env

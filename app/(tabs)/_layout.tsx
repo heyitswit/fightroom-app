@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/lib/stores/auth';
 import { THEME } from '@/lib/theme';
 import { Tabs, router } from 'expo-router';
-import { CalendarIcon, HomeIcon } from 'lucide-react-native';
+import { CalendarIcon, HomeIcon, UsersIcon } from 'lucide-react-native';
 import { useColorScheme } from 'nativewind';
 import * as React from 'react';
 
@@ -35,6 +35,13 @@ export default function TabsLayout() {
         options={{
           title: 'Réservations',
           tabBarIcon: ({ color, size }) => <CalendarIcon color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="friends"
+        options={{
+          title: 'Amis',
+          tabBarIcon: ({ color, size }) => <UsersIcon color={color} size={size} />,
         }}
       />
     </Tabs>

@@ -8,21 +8,32 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { OpenMapsButton } from '@/components/OpenMapsButton';
 import { Separator } from '@/components/ui/separator';
 import { Text } from '@/components/ui/text';
 import { useBookingDetail } from '@/hooks/useBookingDetail';
+import { useFriends } from '@/hooks/useFriends';
 import { useVenues } from '@/hooks/useRooms';
+import { useCreateShare } from '@/hooks/useShares';
 import { cancelBooking, fetchCancellationPreview } from '@/lib/api';
 import type { Booking, CancellationPreview, Netcode } from '@/lib/api';
+import type { SharedBooking } from '@/lib/share-api';
 import { DEPOSIT_STATUS } from '@/lib/labels';
 import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
-import { LockIcon } from 'lucide-react-native';
+import { LockIcon, Share2Icon } from 'lucide-react-native';
 import * as React from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
 
@@ -52,6 +63,10 @@ export default function BookingDetailScreen() {
   const [cancelling, setCancelling] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [preview, setPreview] = React.useState<CancellationPreview | null>(null);
+  const [shareOpen, setShareOpen] = React.useState(false);
+
+  const friends = useFriends();
+  const createShare = useCreateShare();
 
   const item = booking?.booking_line_items[0];
   const deposit = booking?.deposit_summary;
@@ -95,6 +110,45 @@ export default function BookingDetailScreen() {
     }
   }
 
+  // Snapshot of the booking + its access codes to send to a friend.
+  function buildSharedBooking(): SharedBooking | null {
+    if (!booking || !data) return null;
+    return {
+      bookingId: booking.id,
+      room: item?.resource_title ?? 'Salle',
+      date: booking.local_date,
+      startTime: booking.local_start_time,
+      endTime: booking.local_end_time,
+      timeZone: booking.time_zone,
+      netcodes: data.netcodes.map((n) => ({
+        deviceName: n.device_name,
+        code: n.code,
+        status: n.status,
+        from: n.effective_from,
+        until: n.effective_until,
+      })),
+    };
+  }
+
+  function handleShare(toEmail: string, name: string) {
+    const sharedBooking = buildSharedBooking();
+    if (!sharedBooking) return;
+    createShare.mutate(
+      { toEmail, booking: sharedBooking },
+      {
+        onSuccess: () => {
+          setShareOpen(false);
+          Alert.alert('Partagé', `Codes partagés avec ${name}.`);
+        },
+        onError: (e) =>
+          Alert.alert('Erreur', e instanceof Error ? e.message : 'Partage échoué'),
+      }
+    );
+  }
+
+  const canShare = !!booking && !!data && data.netcodes.length > 0;
+  const friendsList = friends.data?.friends ?? [];
+
   return (
     <>
       <ScrollView className="flex-1 bg-background" contentContainerClassName="px-4 pt-4 pb-10 gap-4">
@@ -126,9 +180,21 @@ export default function BookingDetailScreen() {
 
         {/* Access codes */}
         <View className="gap-3">
-          <Text variant="h3" className="text-foreground">
-            Codes d'accès
-          </Text>
+          <View className="flex-row items-center justify-between">
+            <Text variant="h3" className="text-foreground">
+              Codes d'accès
+            </Text>
+            {canShare && (
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => setShareOpen(true)}
+                className="flex-row gap-1.5">
+                <Share2Icon size={15} color="#6b7280" />
+                <Text>Partager</Text>
+              </Button>
+            )}
+          </View>
 
           {isLoading && (
             <View className="items-center py-8">
@@ -233,6 +299,51 @@ export default function BookingDetailScreen() {
           </AlertDialogContent>
         </AlertDialog>
       )}
+
+      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Partager les codes</DialogTitle>
+            <DialogDescription>
+              Choisissez un ami. Il recevra l'heure et les codes d'accès de cette réservation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <View className="gap-2">
+            {friends.isLoading && (
+              <View className="items-center py-4">
+                <ActivityIndicator />
+              </View>
+            )}
+
+            {!friends.isLoading && friendsList.length === 0 && (
+              <Text className="py-2 text-center text-sm text-muted-foreground">
+                Aucun ami pour l'instant. Ajoutez-en dans l'onglet Amis.
+              </Text>
+            )}
+
+            {friendsList.map((friend) => (
+              <Pressable
+                key={friend.requestId}
+                disabled={createShare.isPending}
+                onPress={() => handleShare(friend.email, friend.name)}
+                className="active:opacity-70">
+                <View className="flex-row items-center justify-between rounded-lg border border-border px-4 py-3">
+                  <View className="flex-1 pr-3">
+                    <Text className="font-medium text-foreground">{friend.name}</Text>
+                    <Text className="text-xs text-muted-foreground">{friend.email}</Text>
+                  </View>
+                  {createShare.isPending ? (
+                    <ActivityIndicator size="small" />
+                  ) : (
+                    <Share2Icon size={16} color="#6b7280" />
+                  )}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

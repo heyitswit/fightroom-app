@@ -2,12 +2,17 @@
   "name": "fightroom",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "workspaces": [
+    "server"
+  ],
   "scripts": {
     "dev": "expo start -c",
     "android": "expo start -c --android",
     "ios": "expo start -c --ios",
     "web": "expo start -c --web",
-    "clean": "rm -rf .expo node_modules"
+    "clean": "rm -rf .expo node_modules",
+    "server": "bun --cwd server run dev",
+    "server:start": "bun --cwd server run start"
   },
   "dependencies": {
     "@react-navigation/native": "^7.0.0",

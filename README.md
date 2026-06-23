@@ -1,6 +1,13 @@
-# Fight Room — Application mobile
+# Fight Room — Monorepo
 
 Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). Permet de consulter les lieux, réserver une salle de combat et gérer ses réservations depuis son téléphone.
+
+Ce dépôt est un **monorepo** :
+
+| Package | Emplacement | Rôle |
+|---|---|---|
+| App mobile | racine (`app/`, `components/`, `lib/`…) | App Expo / React Native |
+| Serveur de partage | [`server/`](./server) | Serveur Lacis pour partager les codes d'accès entre amis (ne remplace pas l'API fightroom.fr) |
 
 > **Build Android :** [Télécharger sur Expo](https://expo.dev/artifacts/eas/hnePumutqm8a1nmFisM3xa.apk)
 >
@@ -37,7 +44,8 @@ Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). 
 - **Codes d'accès** — netcodes affichés et copiables depuis la réservation, avec statut traduit (Actif, Autorisé, Programmé…)
 - **Ouvrir sur Maps** — lien direct vers l'adresse dans l'app Maps native
 - **Annulation** — prévisualisation du remboursement avant confirmation
-- **Session persistante** — reconnexion automatique silencieuse à l'expiration du JWT
+- **Session persistante** — reconnexion automatique silencieuse à l'expiration du JWT (détection du 307 `/account` → `/sign-in`)
+- **Amis & partage** — ajout d'amis par email (comptes Fight Room), partage des codes d'accès d'une réservation ; le destinataire récupère automatiquement l'heure et les codes
 
 ## Stack
 
@@ -49,6 +57,10 @@ Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). 
 ## Lancer en local
 
 ```bash
-bun install
-bun run dev
+bun install        # installe l'app + le serveur (workspaces)
+bun run dev        # app Expo
+bun run server     # serveur de partage (http://localhost:3000)
 ```
+
+Pour que l'app cible le serveur, définir `EXPO_PUBLIC_SHARE_API_URL` (défaut :
+`http://localhost:3000`). Détails du serveur : [`server/README.md`](./server/README.md).

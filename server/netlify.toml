@@ -1,0 +1,8 @@
+[build]
+  command = "lacis build"
+  publish = "public"
+
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/api"
+  status = 200

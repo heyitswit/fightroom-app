@@ -1,0 +1,22 @@
+{
+  "name": "@fightroom/share-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Serveur de partage de codes d'accès entre amis Fight Room (Lacis).",
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "start": "tsx server.ts",
+    "build": "lacis build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lacis": "^0.5.0",
+    "tsx": "^4.19.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "~5.9.2"
+  }
+}
