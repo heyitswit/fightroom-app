@@ -11,6 +11,8 @@ export function useShares() {
     queryKey: ['shares'],
     queryFn: fetchShares,
     staleTime: 30 * 1000,
+    // Poll tant que l'écran est affiché : un partage reçu est sensible au temps.
+    refetchInterval: 15 * 1000,
   });
 }
 

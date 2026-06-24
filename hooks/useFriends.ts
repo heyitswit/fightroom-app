@@ -13,6 +13,8 @@ export function useFriends() {
     queryKey: ['friends'],
     queryFn: fetchFriends,
     staleTime: 30 * 1000,
+    // Poll tant que l'écran est affiché (en pause en arrière-plan).
+    refetchInterval: 30 * 1000,
   });
 }
 
@@ -21,6 +23,8 @@ export function useFriendRequests() {
     queryKey: ['friend-requests'],
     queryFn: fetchFriendRequests,
     staleTime: 30 * 1000,
+    // Plus court : une demande reçue est sensible au temps.
+    refetchInterval: 15 * 1000,
   });
 }
 

@@ -14,7 +14,6 @@ import {
 import { useShares } from '@/hooks/useShares';
 import type { Friend, FriendRequest, Share } from '@/lib/share-api';
 import { THEME } from '@/lib/theme';
-import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import * as Clipboard from 'expo-clipboard';
@@ -24,7 +23,6 @@ import * as React from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
 export default function FriendsScreen() {
-  const queryClient = useQueryClient();
   const { colorScheme } = useColorScheme();
   const colors = THEME[colorScheme ?? 'light'];
 
@@ -39,13 +37,17 @@ export default function FriendsScreen() {
 
   const [email, setEmail] = React.useState('');
 
-  const refreshing =
-    friends.isRefetching || requests.isRefetching || shares.isRefetching;
+  // Spinner uniquement pour le pull-to-refresh manuel : le polling de fond
+  // rafraîchit en silence (pas de rond blanc toutes les 15s).
+  const [manualRefreshing, setManualRefreshing] = React.useState(false);
 
-  function refetchAll() {
-    queryClient.invalidateQueries({ queryKey: ['friends'] });
-    queryClient.invalidateQueries({ queryKey: ['friend-requests'] });
-    queryClient.invalidateQueries({ queryKey: ['shares'] });
+  async function onRefresh() {
+    setManualRefreshing(true);
+    try {
+      await Promise.all([friends.refetch(), requests.refetch(), shares.refetch()]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }
 
   function handleAdd() {
@@ -69,7 +71,7 @@ export default function FriendsScreen() {
     <ScrollView
       className="flex-1 bg-background"
       contentContainerClassName="px-4 pt-4 pb-10 gap-6"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetchAll} />}>
+      refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={onRefresh} />}>
       {apiError && (
         <Card className="border-destructive/30 bg-destructive/10 py-4">
           <CardContent>
