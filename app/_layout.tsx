@@ -2,7 +2,7 @@ import '@/global.css';
 
 import { NAV_THEME } from '@/lib/theme';
 import { useAuthStore } from '@/lib/stores/auth';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@react-navigation/native';
 import { PortalHost } from '@rn-primitives/portal';
 import { Stack } from 'expo-router';
@@ -20,6 +20,9 @@ function SessionWatcher() {
   const initialized = useAuthStore((s) => s.initialized);
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
+      // Tell react-query the app is focused so stale queries (friends,
+      // friend-requests, shares…) refetch when the app comes back to foreground.
+      focusManager.setFocused(state === 'active');
       if (state === 'active' && initialized) revalidate();
     });
     return () => sub.remove();
