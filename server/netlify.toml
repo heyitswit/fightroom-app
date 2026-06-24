@@ -1,5 +1,5 @@
 [build]
-  command = "lacis build"
+  command = "lacis build && mkdir -p public"
   publish = "public"
 
 [build.environment]
