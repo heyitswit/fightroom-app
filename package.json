@@ -10,9 +10,11 @@
     "android": "expo start -c --android",
     "ios": "expo start -c --ios",
     "web": "expo start -c --web",
-    "clean": "rm -rf .expo node_modules",
-    "server": "bun --cwd server run dev",
-    "server:start": "bun --cwd server run start"
+    "clean": "rm -rf .expo node_modules server/node_modules",
+    "server": "bun run --filter '@fightroom/share-server' dev",
+    "server:start": "bun run --filter '@fightroom/share-server' start",
+    "server:build": "bun run --filter '@fightroom/share-server' build",
+    "typecheck": "tsc --noEmit && bun run --filter '@fightroom/share-server' typecheck"
   },
   "dependencies": {
     "@react-navigation/native": "^7.0.0",

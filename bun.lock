@@ -73,7 +73,7 @@
       "name": "@fightroom/share-server",
       "version": "1.0.0",
       "dependencies": {
-        "lacis": "latest",
+        "lacis": "^0.5.0",
         "tsx": "^4.19.2",
         "zod": "^3.23.8",
       },
