@@ -1,124 +1,126 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import {
   createBadRequestError,
   createConflictError,
   createForbiddenError,
   createNotFoundError,
 } from 'lacis';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
+import { db } from './db/client';
+import { friendRequests, shares, users } from './db/schema';
 import type { AuthUser, Friend, FriendRequest, Share, SharedBooking } from './types';
 
-// Persistence is a single JSON file with atomic writes. Zero external services,
-// fine for a low-volume friends/sharing feature. The whole DB is held in memory
-// and read-modify-write operations are serialized to avoid lost updates. To run
-// on a serverless platform (no persistent FS), swap this module for a KV/Redis
-// implementation — the exported function surface is all the routes depend on.
+// Persistence is a Postgres database accessed through Drizzle ORM. Concurrency is
+// handled by the database (transactions), so there is no in-memory cache or write
+// serialization here — safe to run on serverless (Vercel/Netlify) where each
+// invocation is a fresh process. The exported function surface is unchanged from
+// the previous JSON-file store, so the routes need no edits.
 
-interface DB {
-  users: Record<string, AuthUser & { updatedAt: string }>;
-  emailIndex: Record<string, string>; // lowercased email -> user id
-  friendRequests: FriendRequest[];
-  shares: Share[];
-}
-
-const DATA_FILE = process.env.DATA_FILE || join(process.cwd(), 'data', 'db.json');
-
-function emptyDb(): DB {
-  return { users: {}, emailIndex: {}, friendRequests: [], shares: [] };
-}
+type Db = typeof db;
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+type Querier = Db | Tx;
 
 const emailKey = (e: string) => e.trim().toLowerCase();
 const fullName = (u: AuthUser) => [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || u.email;
 
-let cache: DB | null = null;
-let writeChain: Promise<void> = Promise.resolve();
+// Case-insensitive email comparison helper (Postgres `lower(col) = value`).
+const emailEq = (col: AnyPgColumn, email: string) =>
+  eq(sql`lower(${col})`, emailKey(email));
 
-async function load(): Promise<DB> {
-  if (cache) return cache;
-  try {
-    const raw = await readFile(DATA_FILE, 'utf-8');
-    cache = { ...emptyDb(), ...(JSON.parse(raw) as Partial<DB>) };
-  } catch {
-    cache = emptyDb();
-  }
-  return cache;
-}
-
-async function persist(db: DB): Promise<void> {
-  await mkdir(dirname(DATA_FILE), { recursive: true });
-  const tmp = `${DATA_FILE}.${randomUUID()}.tmp`;
-  await writeFile(tmp, JSON.stringify(db, null, 2));
-  await rename(tmp, DATA_FILE);
-}
-
-// Serialize read-modify-write operations through a single promise chain. Each op
-// runs after the previous one settles; a failing op rejects its own caller but
-// must NOT poison the chain for later ops, so the chain swallows the outcome.
-async function mutate<T>(fn: (db: DB) => T | Promise<T>): Promise<T> {
-  const run = writeChain.then(async () => {
-    const db = await load();
-    const result = await fn(db);
-    await persist(db);
-    return result;
-  });
-  writeChain = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
+async function userIdByEmail(q: Querier, email: string): Promise<string | null> {
+  const [row] = await q
+    .select({ id: users.id })
+    .from(users)
+    .where(emailEq(users.email, email))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 // --- Users ---
 
 export async function upsertUser(user: AuthUser): Promise<void> {
-  await mutate((db) => {
-    db.users[user.id] = { ...user, updatedAt: new Date().toISOString() };
-    db.emailIndex[emailKey(user.email)] = user.id;
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(users)
+      .values({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        updatedAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
     // Bind any requests/shares that were addressed to this email before the
     // recipient had ever logged in.
-    const key = emailKey(user.email);
-    for (const r of db.friendRequests) {
-      if (!r.toId && emailKey(r.toEmail) === key) r.toId = user.id;
-    }
-    for (const s of db.shares) {
-      if (!s.toId && emailKey(s.toEmail) === key) s.toId = user.id;
-    }
+    await tx
+      .update(friendRequests)
+      .set({ toId: user.id })
+      .where(and(isNull(friendRequests.toId), emailEq(friendRequests.toEmail, user.email)));
+    await tx
+      .update(shares)
+      .set({ toId: user.id })
+      .where(and(isNull(shares.toId), emailEq(shares.toEmail, user.email)));
   });
 }
 
 // --- Friends ---
 
-// An accepted request where the user is on either side.
-function acceptedFor(db: DB, user: AuthUser): FriendRequest[] {
-  const key = emailKey(user.email);
-  return db.friendRequests.filter(
-    (r) =>
-      r.status === 'accepted' &&
-      (r.fromId === user.id || emailKey(r.fromEmail) === key || emailKey(r.toEmail) === key)
-  );
+// Accepted requests where the user is on either side.
+async function acceptedFor(q: Querier, user: AuthUser): Promise<FriendRequest[]> {
+  return q
+    .select()
+    .from(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.status, 'accepted'),
+        or(
+          eq(friendRequests.fromId, user.id),
+          emailEq(friendRequests.fromEmail, user.email),
+          emailEq(friendRequests.toEmail, user.email)
+        )
+      )
+    );
 }
 
-function isFriendWith(db: DB, user: AuthUser, otherEmail: string): boolean {
+async function isFriendWith(q: Querier, user: AuthUser, otherEmail: string): Promise<boolean> {
   const key = emailKey(otherEmail);
-  return acceptedFor(db, user).some(
-    (r) => emailKey(r.fromEmail) === key || emailKey(r.toEmail) === key
-  );
+  const accepted = await acceptedFor(q, user);
+  return accepted.some((r) => emailKey(r.fromEmail) === key || emailKey(r.toEmail) === key);
 }
 
 export async function listFriends(user: AuthUser): Promise<Friend[]> {
-  const db = await load();
   const key = emailKey(user.email);
-  return acceptedFor(db, user).map((r) => {
+  const accepted = await acceptedFor(db, user);
+
+  // Resolve display names for friends that have a known account.
+  const otherIds = accepted
+    .map((r) => (r.fromId === user.id || emailKey(r.fromEmail) === key ? r.toId : r.fromId))
+    .filter((id): id is string => Boolean(id));
+  const known = otherIds.length
+    ? await db.select().from(users).where(inArray(users.id, otherIds))
+    : [];
+  const byId = new Map(known.map((u) => [u.id, u]));
+
+  return accepted.map((r) => {
     const meIsFrom = r.fromId === user.id || emailKey(r.fromEmail) === key;
     const otherEmail = meIsFrom ? r.toEmail : r.fromEmail;
     const otherId = meIsFrom ? r.toId : r.fromId;
-    const known = otherId ? db.users[otherId] : undefined;
+    const friend = otherId ? byId.get(otherId) : undefined;
     return {
       requestId: r.id,
       id: otherId,
       email: otherEmail,
-      name: known ? fullName(known) : meIsFrom ? otherEmail : r.fromName,
+      name: friend ? fullName(friend) : meIsFrom ? otherEmail : r.fromName,
       since: r.respondedAt ?? r.createdAt,
     };
   });
@@ -127,12 +129,16 @@ export async function listFriends(user: AuthUser): Promise<Friend[]> {
 export async function listRequests(
   user: AuthUser
 ): Promise<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }> {
-  const db = await load();
-  const key = emailKey(user.email);
-  const incoming = db.friendRequests.filter(
-    (r) => r.status === 'pending' && emailKey(r.toEmail) === key
-  );
-  const outgoing = db.friendRequests.filter((r) => r.status === 'pending' && r.fromId === user.id);
+  const [incoming, outgoing] = await Promise.all([
+    db
+      .select()
+      .from(friendRequests)
+      .where(and(eq(friendRequests.status, 'pending'), emailEq(friendRequests.toEmail, user.email))),
+    db
+      .select()
+      .from(friendRequests)
+      .where(and(eq(friendRequests.status, 'pending'), eq(friendRequests.fromId, user.id))),
+  ]);
   return { incoming, outgoing };
 }
 
@@ -143,43 +149,53 @@ export async function createFriendRequest(user: AuthUser, toEmailRaw: string): P
     throw createBadRequestError('Vous ne pouvez pas vous ajouter vous-même.');
   }
 
-  return mutate((db) => {
-    if (isFriendWith(db, user, toEmail)) {
+  return db.transaction(async (tx) => {
+    if (await isFriendWith(tx, user, toEmail)) {
       throw createConflictError('Vous êtes déjà amis.');
     }
 
     // If the target already sent ME a pending request, accept it instead of
     // creating a mirror request.
-    const reverse = db.friendRequests.find(
-      (r) =>
-        r.status === 'pending' &&
-        emailKey(r.fromEmail) === toKey &&
-        emailKey(r.toEmail) === emailKey(user.email)
-    );
-    if (reverse) {
-      reverse.status = 'accepted';
-      reverse.respondedAt = new Date().toISOString();
-      reverse.toId = user.id;
-      return reverse;
-    }
+    const [reverse] = await tx
+      .update(friendRequests)
+      .set({ status: 'accepted', respondedAt: new Date().toISOString(), toId: user.id })
+      .where(
+        and(
+          eq(friendRequests.status, 'pending'),
+          emailEq(friendRequests.fromEmail, toEmail),
+          emailEq(friendRequests.toEmail, user.email)
+        )
+      )
+      .returning();
+    if (reverse) return reverse;
 
-    const existing = db.friendRequests.find(
-      (r) => r.status === 'pending' && r.fromId === user.id && emailKey(r.toEmail) === toKey
-    );
+    const [existing] = await tx
+      .select()
+      .from(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.status, 'pending'),
+          eq(friendRequests.fromId, user.id),
+          emailEq(friendRequests.toEmail, toEmail)
+        )
+      )
+      .limit(1);
     if (existing) throw createConflictError('Demande déjà envoyée.');
 
-    const request: FriendRequest = {
-      id: randomUUID(),
-      fromId: user.id,
-      fromEmail: user.email,
-      fromName: fullName(user),
-      toEmail,
-      toId: db.emailIndex[toKey] ?? null,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      respondedAt: null,
-    };
-    db.friendRequests.push(request);
+    const [request] = await tx
+      .insert(friendRequests)
+      .values({
+        id: randomUUID(),
+        fromId: user.id,
+        fromEmail: user.email,
+        fromName: fullName(user),
+        toEmail,
+        toId: await userIdByEmail(tx, toEmail),
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        respondedAt: null,
+      })
+      .returning();
     return request;
   });
 }
@@ -189,53 +205,74 @@ export async function respondToRequest(
   id: string,
   action: 'accept' | 'decline'
 ): Promise<FriendRequest> {
-  return mutate((db) => {
-    const req = db.friendRequests.find((r) => r.id === id);
+  return db.transaction(async (tx) => {
+    const [req] = await tx.select().from(friendRequests).where(eq(friendRequests.id, id)).limit(1);
     if (!req) throw createNotFoundError('Demande introuvable.');
     if (emailKey(req.toEmail) !== emailKey(user.email)) {
-      throw createForbiddenError("Cette demande ne vous est pas adressée.");
+      throw createForbiddenError('Cette demande ne vous est pas adressée.');
     }
     if (req.status !== 'pending') throw createConflictError('Demande déjà traitée.');
-    req.status = action === 'accept' ? 'accepted' : 'declined';
-    req.respondedAt = new Date().toISOString();
-    req.toId = user.id;
-    return req;
+
+    const [updated] = await tx
+      .update(friendRequests)
+      .set({
+        status: action === 'accept' ? 'accepted' : 'declined',
+        respondedAt: new Date().toISOString(),
+        toId: user.id,
+      })
+      .where(eq(friendRequests.id, id))
+      .returning();
+    return updated;
   });
 }
 
 // Cancel an outgoing pending request (sender side).
 export async function cancelRequest(user: AuthUser, id: string): Promise<void> {
-  await mutate((db) => {
-    const idx = db.friendRequests.findIndex(
-      (r) => r.id === id && r.fromId === user.id && r.status === 'pending'
-    );
-    if (idx === -1) throw createNotFoundError('Demande introuvable.');
-    db.friendRequests.splice(idx, 1);
-  });
+  const deleted = await db
+    .delete(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.id, id),
+        eq(friendRequests.fromId, user.id),
+        eq(friendRequests.status, 'pending')
+      )
+    )
+    .returning({ id: friendRequests.id });
+  if (deleted.length === 0) throw createNotFoundError('Demande introuvable.');
 }
 
 // Remove an existing friendship (either side).
 export async function removeFriend(user: AuthUser, requestId: string): Promise<void> {
   const key = emailKey(user.email);
-  await mutate((db) => {
-    const idx = db.friendRequests.findIndex(
-      (r) =>
-        r.id === requestId &&
-        r.status === 'accepted' &&
-        (r.fromId === user.id || emailKey(r.fromEmail) === key || emailKey(r.toEmail) === key)
-    );
-    if (idx === -1) throw createNotFoundError('Ami introuvable.');
-    const [removed] = db.friendRequests.splice(idx, 1);
+  await db.transaction(async (tx) => {
+    const [removed] = await tx
+      .delete(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.id, requestId),
+          eq(friendRequests.status, 'accepted'),
+          or(
+            eq(friendRequests.fromId, user.id),
+            emailEq(friendRequests.fromEmail, user.email),
+            emailEq(friendRequests.toEmail, user.email)
+          )
+        )
+      )
+      .returning();
+    if (!removed) throw createNotFoundError('Ami introuvable.');
+
     // Drop shares exchanged with that person too. The friend's email is whichever
     // side of the removed friendship isn't us.
     const friendEmail =
       emailKey(removed.fromEmail) === key ? emailKey(removed.toEmail) : emailKey(removed.fromEmail);
-    db.shares = db.shares.filter((s) => {
-      const betweenUs =
-        (s.fromId === user.id && emailKey(s.toEmail) === friendEmail) ||
-        (emailKey(s.fromEmail) === friendEmail && emailKey(s.toEmail) === key);
-      return !betweenUs;
-    });
+    await tx
+      .delete(shares)
+      .where(
+        or(
+          and(eq(shares.fromId, user.id), emailEq(shares.toEmail, friendEmail)),
+          and(emailEq(shares.fromEmail, friendEmail), emailEq(shares.toEmail, user.email))
+        )
+      );
   });
 }
 
@@ -247,55 +284,55 @@ export async function createShare(
   booking: SharedBooking
 ): Promise<Share> {
   const toEmail = toEmailRaw.trim();
-  return mutate((db) => {
-    if (!isFriendWith(db, user, toEmail)) {
+  return db.transaction(async (tx) => {
+    if (!(await isFriendWith(tx, user, toEmail))) {
       throw createForbiddenError('Vous ne pouvez partager qu\'avec un ami.');
     }
-    const share: Share = {
-      id: randomUUID(),
-      fromId: user.id,
-      fromEmail: user.email,
-      fromName: fullName(user),
-      toEmail,
-      toId: db.emailIndex[emailKey(toEmail)] ?? null,
-      booking,
-      createdAt: new Date().toISOString(),
-    };
+
     // Replace a previous share of the same booking to the same friend (refresh).
-    db.shares = db.shares.filter(
-      (s) =>
-        !(
-          s.fromId === user.id &&
-          emailKey(s.toEmail) === emailKey(toEmail) &&
-          s.booking.bookingId === booking.bookingId
+    await tx
+      .delete(shares)
+      .where(
+        and(
+          eq(shares.fromId, user.id),
+          emailEq(shares.toEmail, toEmail),
+          eq(sql`${shares.booking}->>'bookingId'`, booking.bookingId)
         )
-    );
-    db.shares.push(share);
+      );
+
+    const [share] = await tx
+      .insert(shares)
+      .values({
+        id: randomUUID(),
+        fromId: user.id,
+        fromEmail: user.email,
+        fromName: fullName(user),
+        toEmail,
+        toId: await userIdByEmail(tx, toEmail),
+        booking,
+        createdAt: new Date().toISOString(),
+      })
+      .returning();
     return share;
   });
 }
 
-export async function listShares(
-  user: AuthUser
-): Promise<{ received: Share[]; sent: Share[] }> {
-  const db = await load();
-  const key = emailKey(user.email);
-  const received = db.shares
-    .filter((s) => emailKey(s.toEmail) === key)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const sent = db.shares
-    .filter((s) => s.fromId === user.id)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function listShares(user: AuthUser): Promise<{ received: Share[]; sent: Share[] }> {
+  const [received, sent] = await Promise.all([
+    db
+      .select()
+      .from(shares)
+      .where(emailEq(shares.toEmail, user.email))
+      .orderBy(desc(shares.createdAt)),
+    db.select().from(shares).where(eq(shares.fromId, user.id)).orderBy(desc(shares.createdAt)),
+  ]);
   return { received, sent };
 }
 
 export async function deleteShare(user: AuthUser, id: string): Promise<void> {
-  const key = emailKey(user.email);
-  await mutate((db) => {
-    const idx = db.shares.findIndex(
-      (s) => s.id === id && (s.fromId === user.id || emailKey(s.toEmail) === key)
-    );
-    if (idx === -1) throw createNotFoundError('Partage introuvable.');
-    db.shares.splice(idx, 1);
-  });
+  const deleted = await db
+    .delete(shares)
+    .where(and(eq(shares.id, id), or(eq(shares.fromId, user.id), emailEq(shares.toEmail, user.email))))
+    .returning({ id: shares.id });
+  if (deleted.length === 0) throw createNotFoundError('Partage introuvable.');
 }

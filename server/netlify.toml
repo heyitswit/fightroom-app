@@ -2,6 +2,9 @@
   command = "lacis build"
   publish = "public"
 
+[build.environment]
+  NODE_VERSION = "22"
+
 [[redirects]]
   from = "/*"
   to = "/.netlify/functions/api"

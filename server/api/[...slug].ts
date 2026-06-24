@@ -3,9 +3,9 @@ import { vercelAdapter } from 'lacis/adapters';
 // filesystem at runtime, so routes are imported from a pre-built manifest.
 import { routes, middlewares } from '../routes/_manifest.js';
 
-// NOTE: the default JSON-file store in src/store.ts will NOT persist on Vercel
-// (no writable filesystem). Before deploying here, swap src/store.ts for a
-// KV/Redis-backed implementation. See README "Déploiement serverless".
+// The store (src/store.ts) is backed by Postgres via Drizzle, so it persists
+// fine on serverless. Just set DATABASE_URL in the platform env and run the
+// migrations once (`npm run db:push`). See README "Déploiement serverless".
 const handler = vercelAdapter.createHandler({
   routes,
   middlewares,

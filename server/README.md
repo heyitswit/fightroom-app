@@ -23,7 +23,15 @@ bun install        # ou: npm install
 bun run dev        # ou: npm run dev  → http://localhost:3000
 ```
 
-Les données sont écrites dans `server/data/db.json` (gitignoré).
+Les données sont stockées dans **Postgres** (via [Drizzle ORM](https://orm.drizzle.team)).
+Copie `.env.example` en `.env` et renseigne `DATABASE_URL`, puis crée les tables :
+
+```bash
+npm run db:push     # synchronise le schéma (src/db/schema.ts) avec la base
+```
+
+Scripts ORM : `db:push` (sync direct), `db:generate` + `db:migrate` (migrations
+versionnées), `db:studio` (UI).
 
 ## Endpoints
 
@@ -45,9 +53,11 @@ Toutes les routes (sauf `/`) exigent `Authorization: Bearer <jwt Medusa>`.
 
 ## Déploiement
 
-### Node (recommandé)
+Le store étant adossé à Postgres, **toutes les cibles** (Node ou serverless)
+fonctionnent de la même façon : il suffit de fournir `DATABASE_URL` et d'avoir
+lancé `npm run db:push` une fois.
 
-Filesystem persistant → le store JSON fonctionne tel quel.
+### Node
 
 ```bash
 NODE_ENV=production PORT=3000 bun run start   # ou: npm run start
@@ -60,9 +70,11 @@ Configure ensuite `EXPO_PUBLIC_SHARE_API_URL` dans l'app vers cette URL.
 
 Lacis supporte Vercel/Netlify (`api/[...slug].ts`, `vercel.json`,
 `netlify/functions/api.ts`, `netlify.toml` fournis, build via `lacis build`).
+La connexion réutilise un seul socket par instance (`max: 1`), donc pas de
+saturation des connexions Postgres.
 
-⚠️ **Limite technique** : ces plateformes n'ont **pas de filesystem
-persistant**, donc le store JSON par défaut (`src/store.ts`) ne persiste pas.
-Pour déployer en serverless, remplace `src/store.ts` par une implémentation
-KV/Redis (ex. Upstash) en gardant la même surface de fonctions exportées. C'est
-la raison pour laquelle la cible par défaut est Node.
+1. Définis `DATABASE_URL` dans les variables d'environnement de la plateforme
+   (Netlify : *Site settings → Environment variables*).
+2. Lance les migrations une fois : `npm run db:push` (en local, pointant sur la
+   même base).
+3. Déploie. C'est tout.
