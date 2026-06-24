@@ -2,12 +2,19 @@
   "name": "fightroom",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "workspaces": [
+    "server"
+  ],
   "scripts": {
     "dev": "expo start -c",
     "android": "expo start -c --android",
     "ios": "expo start -c --ios",
     "web": "expo start -c --web",
-    "clean": "rm -rf .expo node_modules"
+    "clean": "rm -rf .expo node_modules server/node_modules",
+    "server": "bun run --filter '@fightroom/share-server' dev",
+    "server:start": "bun run --filter '@fightroom/share-server' start",
+    "server:build": "bun run --filter '@fightroom/share-server' build",
+    "typecheck": "tsc --noEmit && bun run --filter '@fightroom/share-server' typecheck"
   },
   "dependencies": {
     "@react-navigation/native": "^7.0.0",
@@ -68,6 +75,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@expo/ngrok": "^4.1.0",
     "@types/react": "~19.1.10",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",

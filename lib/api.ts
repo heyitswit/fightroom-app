@@ -4,14 +4,27 @@ const BASE_URL = 'https://fightroom.fr';
 
 export const SESSION_EXPIRED_ERROR = 'Session expirée, veuillez vous reconnecter';
 
+const SIGNIN_PATH = '/sign-in';
+
 let _onUnauthorized: (() => void | Promise<void>) | null = null;
 
 export function registerUnauthorizedHandler(handler: () => void | Promise<void>): void {
   _onUnauthorized = handler;
 }
 
+// An expired Medusa session does NOT reliably surface as a 401 on fightroom.fr.
+// Protected routes (e.g. /account, /account/bookings) answer with a 307 redirect
+// to /sign-in. Since fetch follows redirects by default, the final response is the
+// sign-in page with status 200 — so we detect expiry via the redirect chain.
+function isSignInRedirect(res: Response): boolean {
+  if (res.type === 'opaqueredirect') return true; // redirect:'manual' on web
+  if (res.status >= 300 && res.status < 400) return true; // redirect not followed
+  if (res.redirected && res.url.includes(SIGNIN_PATH)) return true; // redirect followed
+  return false;
+}
+
 function assertOk(res: Response, errMsg: string): void {
-  if (res.status === 401) {
+  if (res.status === 401 || isSignInRedirect(res)) {
     _onUnauthorized?.();
     throw new Error(SESSION_EXPIRED_ERROR);
   }
@@ -90,6 +103,24 @@ export async function reauthenticate(): Promise<string | null> {
 
 export async function getStoredJwt(): Promise<string | null> {
   return SecureStore.getItemAsync(JWT_KEY);
+}
+
+// Probes whether the Medusa session is still valid by hitting a protected page.
+// fightroom.fr answers an expired session with a 307 redirect to /sign-in, which
+// regular API calls swallow (fetch follows it → 200 sign-in page) — so we probe
+// explicitly with redirect:'manual' and treat any redirect as "expired".
+// Returns null on network error so callers don't log the user out spuriously.
+export async function isSessionValid(): Promise<boolean | null> {
+  try {
+    const headers = await buildHeaders();
+    const res = await fetch(`${BASE_URL}/account`, { headers, redirect: 'manual' });
+    if (res.type === 'opaqueredirect') return false;
+    if (res.status >= 300 && res.status < 400) return false;
+    if (res.redirected && res.url.includes(SIGNIN_PATH)) return false;
+    return res.ok;
+  } catch {
+    return null;
+  }
 }
 
 export async function getSessionCookieString(): Promise<string> {

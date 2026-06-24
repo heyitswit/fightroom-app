@@ -1,0 +1,5 @@
+# React Native / Expo (Metro + Babel) exigent un node_modules "hoisted".
+# Le linker "isolated" (défaut de bun en workspace) casse la résolution des
+# dépendances transitives comme babel-preset-expo.
+[install]
+linker = "hoisted"

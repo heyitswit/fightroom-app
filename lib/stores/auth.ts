@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   fetchCustomer,
   getStoredJwt,
+  isSessionValid,
   login as apiLogin,
   logout as apiLogout,
   reauthenticate,
@@ -23,9 +24,11 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => {
   let reauthInProgress = false;
-  registerUnauthorizedHandler(async () => {
-    // Don't fire during initialization — initialize() handles startup 401 itself
-    if (reauthInProgress || !get().initialized) return;
+
+  // Silently re-login with the stored credentials and refresh the customer.
+  // Returns true if the session is valid afterwards. Guarded against re-entry.
+  async function silentReauth(): Promise<boolean> {
+    if (reauthInProgress) return !!get().jwt;
     reauthInProgress = true;
     try {
       const newJwt = await reauthenticate();
@@ -37,13 +40,20 @@ export const useAuthStore = create<AuthState>((set, get) => {
         } catch {
           // customer stays as-is, session is valid
         }
-      } else {
-        await apiLogout();
-        set({ jwt: null, customer: null });
+        return true;
       }
+      await apiLogout();
+      set({ jwt: null, customer: null });
+      return false;
     } finally {
       reauthInProgress = false;
     }
+  }
+
+  registerUnauthorizedHandler(async () => {
+    // Don't fire during initialization — initialize() handles startup 401 itself
+    if (!get().initialized) return;
+    await silentReauth();
   });
 
   return {
@@ -62,22 +72,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
             const { customer } = await fetchCustomer();
             set({ customer });
           } catch (e) {
+            // JWT expired/invalid on startup: try a silent reauth before giving up.
+            // (registerUnauthorizedHandler is inert until `initialized` is true.)
             if (e instanceof Error && e.message === SESSION_EXPIRED_ERROR) {
-              // JWT expired on startup: try silent reauth before giving up
-              const newJwt = await reauthenticate();
-              if (newJwt) {
-                set({ jwt: newJwt });
-                try {
-                  const { customer } = await fetchCustomer();
-                  set({ customer });
-                } catch {
-                  await apiLogout();
-                  set({ jwt: null, customer: null });
-                }
-              } else {
-                await apiLogout();
-                set({ jwt: null, customer: null });
-              }
+              await silentReauth();
             } else {
               await apiLogout();
               set({ jwt: null, customer: null });
@@ -102,6 +100,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     revalidate: async () => {
       if (!get().initialized || !get().jwt) return;
+      // Proactively detect an expired Medusa session (307 → /sign-in) that the
+      // API endpoints don't surface as a 401, and silently refresh the token.
+      const valid = await isSessionValid();
+      if (valid === false) {
+        await silentReauth();
+        return;
+      }
       try {
         const { customer } = await fetchCustomer();
         set({ customer });
