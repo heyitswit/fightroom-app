@@ -4,12 +4,12 @@ Application compagnon non-officielle pour [fightroom.fr](https://fightroom.fr). 
 
 Ce dépôt est un **monorepo** :
 
-| Package | Emplacement | Rôle |
-|---|---|---|
-| App mobile | racine (`app/`, `components/`, `lib/`…) | App Expo / React Native |
-| Serveur de partage | [`server/`](./server) | Serveur Lacis pour partager les codes d'accès entre amis (ne remplace pas l'API fightroom.fr) |
+| Package            | Emplacement                             | Rôle                                                                                          |
+| ------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------- |
+| App mobile         | racine (`app/`, `components/`, `lib/`…) | App Expo / React Native                                                                       |
+| Serveur de partage | [`server/`](./server)                   | Serveur Lacis pour partager les codes d'accès entre amis (ne remplace pas l'API fightroom.fr) |
 
-> **Build Android :** [Télécharger sur Expo](https://expo.dev/artifacts/eas/hnePumutqm8a1nmFisM3xa.apk)
+> **Build Android :** [Télécharger sur Expo](https://expo.dev/artifacts/eas/Vq4ZrPMu9EWyirJwofZ22TotIkT9PGm7REp6QuqjpJc.apk)
 >
 > <img src="pictures/qr_code_build.png" width="160"/>
 
