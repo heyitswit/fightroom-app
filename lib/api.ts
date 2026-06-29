@@ -105,19 +105,16 @@ export async function getStoredJwt(): Promise<string | null> {
   return SecureStore.getItemAsync(JWT_KEY);
 }
 
-// Probes whether the Medusa session is still valid by hitting a protected page.
-// fightroom.fr answers an expired session with a 307 redirect to /sign-in, which
-// regular API calls swallow (fetch follows it → 200 sign-in page) — so we probe
-// explicitly with redirect:'manual' and treat any redirect as "expired".
-// Returns null on network error so callers don't log the user out spuriously.
+// Probes whether the Medusa session is still valid.
+// Returns null on network/transient error so callers don't log the user out spuriously.
 export async function isSessionValid(): Promise<boolean | null> {
   try {
     const headers = await buildHeaders();
-    const res = await fetch(`${BASE_URL}/account`, { headers, redirect: 'manual' });
-    if (res.type === 'opaqueredirect') return false;
-    if (res.status >= 300 && res.status < 400) return false;
-    if (res.redirected && res.url.includes(SIGNIN_PATH)) return false;
-    return res.ok;
+    const res = await fetch(`${BASE_URL}/api/storefront/customer`, { headers });
+    if (res.status === 401 || isSignInRedirect(res)) return false;
+    if (!res.ok) return null;
+    const data = (await res.json()) as { customer: Customer | null };
+    return data.customer != null;
   } catch {
     return null;
   }
@@ -378,7 +375,14 @@ export async function fetchCustomer(): Promise<{ customer: Customer }> {
   const headers = await buildHeaders();
   const res = await fetch(`${BASE_URL}/api/storefront/customer`, { headers });
   assertOk(res, 'Erreur client');
-  return res.json();
+  const data = (await res.json()) as { customer: Customer | null };
+  // An expired _medusa_jwt returns 200 with { customer: null } (no 401, no redirect).
+  // Treat that as the session-expired signal so the reauth flow kicks in.
+  if (!data.customer) {
+    _onUnauthorized?.();
+    throw new Error(SESSION_EXPIRED_ERROR);
+  }
+  return data as { customer: Customer };
 }
 
 // Extract a JSON field value from the RSC text payload.
